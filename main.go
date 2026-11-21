@@ -6,7 +6,10 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
+
+	_ "embed"
 
 	"github.com/coder/websocket"
 )
@@ -31,6 +34,9 @@ var registry = &RoomRegistry{
 	cards: make(map[string]string),
 	rooms: make(map[string]*Room),
 }
+
+//go:embed ludo.html
+var ludoHTML []byte
 
 func (r *RoomRegistry) register(cardID, chatJID string) {
 	r.mu.Lock()
@@ -108,6 +114,14 @@ func (room *Room) setState(payload []byte) {
 	room.mu.Lock()
 	room.state = append([]byte(nil), payload...)
 	room.mu.Unlock()
+}
+
+func mustJSON(v any) string {
+	b, err := json.Marshal(v)
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
 }
 
 func main() {
@@ -211,6 +225,31 @@ func main() {
 			room.broadcast(relay)
 			log.Printf("[WS] ACTION card=%s chat=%s seat=%d payload=%s", cardID, chatJID, seat, relay)
 		}
+	})
+
+	mux.HandleFunc("/ludo", func(w http.ResponseWriter, r *http.Request) {
+		lobby := r.URL.Query().Get("lobby")
+		player := r.URL.Query().Get("player")
+		html := string(ludoHTML)
+		html = strings.Replace(html, "<head>", "<head><script>window.__LOBBY_ID__="+mustJSON(lobby)+";window.__PLAYER_ID__="+mustJSON(player)+";</script>", 1)
+		bootstrap := `<script>
+(function(){
+var lobby=window.__LOBBY_ID__||new URLSearchParams(location.search).get('lobby')||'lobby';
+var player=window.__PLAYER_ID__||new URLSearchParams(location.search).get('player')||'';
+if(!player){player=(crypto.randomUUID?crypto.randomUUID():Math.random().toString(36).slice(2));try{localStorage.setItem('ludo-player-id',player)}catch(e){}}
+var proto=location.protocol==='https:'?'wss':'ws';var ws=new WebSocket(proto+'://'+location.host+'/ws?lobby='+encodeURIComponent(lobby)+'&card='+encodeURIComponent(lobby)+'&player='+encodeURIComponent(player));
+window.__LUDO_WS__=ws;
+ws.onopen=function(){console.log('[LUDO] connected lobby='+lobby+' player='+player)};
+ws.onmessage=function(e){try{var m=JSON.parse(e.data);window.dispatchEvent(new CustomEvent('ludo-sync',{detail:m}));if(m.type==='joined')window.dispatchEvent(new CustomEvent('ludo-seat',{detail:m}))}catch(e){console.log('[LUDO] invalid message',e)}};
+ws.onerror=function(){console.log('[LUDO] connection error')};
+window.__LUDO_MULTIPLAYER__={seat:function(){return window.__LUDO_SEAT__||-1},players:function(){return window.__LUDO_PLAYERS__||0},send:function(type,data){if(ws.readyState===WebSocket.OPEN)ws.send(JSON.stringify(Object.assign({type:type,lobby:lobby,player:player},data||{})))}};
+window.addEventListener('ludo-seat',function(e){window.__LUDO_SEAT__=e.detail.seat;window.__LUDO_PLAYERS__=e.detail.players});
+})();
+</script>`
+		html = strings.Replace(html, "</body>", bootstrap+"</body>", 1)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		_, _ = w.Write([]byte(html))
 	})
 
 	port := os.Getenv("PORT")
