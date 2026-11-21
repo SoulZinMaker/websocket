@@ -100,7 +100,7 @@ $('roll').disabled=!(phase==='await'&&human(cur));$('roll').textContent=phase===
 function newGame(n){gen++;mode=n;active=n===1?[0,2]:n===2?[0,2]:[0,1,2,3];tokens=PL.map(()=>[-1,-1,-1,-1]);cur=0;sixes=0;winner=-1;caps=0;mv=null;parts=[];legal=[];
 $('ov').classList.add('hide');ac();bgm(true);broadcastMultiplayer();awaitRoll()}
 function awaitRoll(){phase='await';legal=[];ui();
-if(human(cur))status('YOUR TURN! TAP ROLL');else if(mode===2){ui();status(PL[cur].n+' WAITING FOR PLAYER')}else{phase='bot';ui();status(PL[cur].n+' ROLLED '+r);const L=legal,m=botPick(cur,legal);later(()=>{if(legal===L&&phase==='bot')pick(m.ti)},650)}}
+if(human(cur))status('YOUR TURN! TAP ROLL');else if(mode===2){status(PL[cur].n+' WAITING FOR PLAYER')}else{status(PL[cur].n+' IS THINKING...');later(doRoll,800)}}
 function doRoll(){if(phase!=='await')return;phase='rolling';ui();if(window.__LUDO_MULTIPLAYER__)window.__LUDO_MULTIPLAYER__.send('roll',{cur:cur});rolling=performance.now();
 let n=0;const iv=setInterval(()=>{sfx.rattle();diceV=1+Math.random()*6|0;if(++n>=8)clearInterval(iv)},75);
 later(()=>{rolling=0;diceV=1+Math.random()*6|0;afterRoll(diceV);broadcastMultiplayer()},650)}
@@ -108,8 +108,8 @@ function afterRoll(r){sixes=r===6?sixes+1:0;
 if(sixes===3){status('THREE SIXES! TURN LOST');sfx.no();later(()=>endTurn(false),1000);return}
 legal=legalMoves(cur,r);
 if(!legal.length){status(PL[cur].n+' ROLLED '+r+' - NO MOVE');sfx.no();later(()=>endTurn(r===6),900);return}
-if(human(cur)){phase='choose';ui();
-if(legal.length===1){status('ROLLED '+r+' - MOVING');const L=legal;later(()=>{if(legal===L&&phase==='choose')pick(L[0].ti)},500)}else status('ROLLED '+r+' - TAP A TOKEN')}
+if(human(cur)){phase='choose';ui();if(legal.length===1){status('ROLLED '+r+' - MOVING');const L=legal;later(()=>{if(legal===L&&phase==='choose')pick(L[0].ti)},500)}else status('ROLLED '+r+' - TAP A TOKEN')}
+else if(mode===2){ui();status(PL[cur].n+' WAITING FOR PLAYER')}
 else{phase='bot';ui();status(PL[cur].n+' ROLLED '+r);const L=legal,m=botPick(cur,legal);later(()=>{if(legal===L&&phase==='bot')pick(m.ti)},650)}}
 function pick(ti){if(phase!=='choose'&&phase!=='bot')return;const m=legal.find(x=>x.ti===ti);if(!m)return;
 phase='moving';legal=[];const from=tokens[cur][ti],steps=from<0?[0]:[];if(from>=0)for(let k=from+1;k<=m.np;k++)steps.push(k);
@@ -181,7 +181,8 @@ $('stage').addEventListener('pointerdown',e=>{e.preventDefault();ac();if(phase!=
 x=(e.clientX-r.left)/r.width*W,y=(e.clientY-r.top)/r.height*W;let best=null,bd=18*18;
 legal.forEach(m=>{const[tx,ty]=xy(cur,m.ti,tokens[cur][m.ti]),d=(tx-x)**2+(ty-4-y)**2;if(d<bd){bd=d;best=m}});if(best)pick(best.ti)});
 const roll=()=>{if(phase==='await'&&human(cur)){ac();doRoll()}};
-$('roll').onclick=roll;$('dice').onclick=roll;
+$('roll').onclick=null;$('dice').onclick=null;
+$('roll').addEventListener('click',roll);$('dice').addEventListener('pointerdown',roll);
 addEventListener('keydown',e=>{if(e.code==='Space'||e.code==='Enter'){e.preventDefault();roll()}if(phase==='choose'&&/^[1-4]$/.test(e.key))pick(+e.key-1)});
 $('b1').onclick=()=>newGame(1);$('bHuman').onclick=()=>{if(multiplayerPlayers<2){status('WAITING FOR PLAYER 2');return}newGame(2)};
 $('b3').onclick=()=>newGame(3);
