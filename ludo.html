@@ -101,7 +101,7 @@ function newGame(n){gen++;mode=n;active=n===1?[0,2]:n===2?[0,2]:[0,1,2,3];tokens
 $('ov').classList.add('hide');ac();bgm(true);broadcastMultiplayer();awaitRoll()}
 function awaitRoll(){phase='await';legal=[];ui();
 if(human(cur))status('YOUR TURN! TAP ROLL');else if(mode===2){status(PL[cur].n+' WAITING FOR PLAYER')}else{status(PL[cur].n+' IS THINKING...');later(doRoll,800)}}
-function doRoll(){if(phase!=='await')return;phase='rolling';ui();if(window.__LUDO_MULTIPLAYER__)window.__LUDO_MULTIPLAYER__.send('roll',{cur:cur});rolling=performance.now();
+function doRoll(){if(phase!=='await'||(mode===2&&!human(cur)))return;phase='rolling';ui();if(window.__LUDO_MULTIPLAYER__)window.__LUDO_MULTIPLAYER__.send('roll',{cur:cur,seatSource:window.__LUDO_MULTIPLAYER__.seat()});rolling=performance.now();
 let n=0;const iv=setInterval(()=>{sfx.rattle();diceV=1+Math.random()*6|0;if(++n>=8)clearInterval(iv)},75);
 later(()=>{rolling=0;diceV=1+Math.random()*6|0;afterRoll(diceV);broadcastMultiplayer()},650)}
 function afterRoll(r){sixes=r===6?sixes+1:0;
@@ -111,7 +111,7 @@ if(!legal.length){status(PL[cur].n+' ROLLED '+r+' - NO MOVE');sfx.no();later(()=
 if(human(cur)){phase='choose';ui();if(legal.length===1){status('ROLLED '+r+' - MOVING');const L=legal;later(()=>{if(legal===L&&phase==='choose')pick(L[0].ti)},500)}else status('ROLLED '+r+' - TAP A TOKEN')}
 else if(mode===2){ui();status(PL[cur].n+' WAITING FOR PLAYER')}
 else{phase='bot';ui();status(PL[cur].n+' ROLLED '+r);const L=legal,m=botPick(cur,legal);later(()=>{if(legal===L&&phase==='bot')pick(m.ti)},650)}}
-function pick(ti){if(phase!=='choose'&&phase!=='bot')return;const m=legal.find(x=>x.ti===ti);if(!m)return;
+function pick(ti){if(mode===2&&!human(cur))return;if(phase!=='choose'&&phase!=='bot')return;const m=legal.find(x=>x.ti===ti);if(!m)return;
 phase='moving';legal=[];const from=tokens[cur][ti],steps=from<0?[0]:[];if(from>=0)for(let k=from+1;k<=m.np;k++)steps.push(k);
 mv={p:cur,ti:ti,from:from,steps:steps,i:0,t:0,np:m.np,last:performance.now()};if(window.__LUDO_MULTIPLAYER__)window.__LUDO_MULTIPLAYER__.send('move',{ti:ti,np:m.np});ui();broadcastMultiplayer()}
 function stepMove(now){const m=mv;if(!m)return;const dur=m.from<0?260:110;m.t=(now-m.last)/dur;
@@ -127,7 +127,7 @@ if(tokens[p].every(x=>x===56)){winner=p;phase='over';ui();later(()=>over(p),900)
 extra=(diceV===6)||cap>0||np===56;
 later(()=>endTurn(extra),cap||np===56?700:350)}
 function nextP(){let i=active.indexOf(cur);return active[(i+1)%active.length]}
-function endTurn(extra){if(winner>=0)return;if(!extra){cur=nextP();sixes=0}else if(human(cur)||true)status(PL[cur].n+' ROLLS AGAIN!');awaitRoll()}
+function endTurn(extra){if(winner>=0)return;if(!extra){cur=nextP();sixes=0}else if(human(cur)||true)status(PL[cur].n+' ROLLS AGAIN!');broadcastMultiplayer();awaitRoll()}
 function over(p){bgm(false);const w=human(p);if(w){wins++;try{localStorage.setItem('ludoWins',wins)}catch(e){}sfx.win()}else sfx.lose();ui();
 $('ovT').textContent=w?'YOU WIN!':PL[p].n+' WINS';$('ovP').textContent=w?'ALL 4 TOKENS HOME. LEGEND!':'THE OPPONENT WAS FASTER. TRY AGAIN!';
 $('b1').innerHTML='&#9654; VS 1 BOT';$('ov').classList.remove('hide');status(w?'VICTORY!':'DEFEAT...')}
@@ -184,7 +184,7 @@ const roll=()=>{if(phase==='await'&&human(cur)){ac();doRoll()}};
 $('roll').onclick=null;$('dice').onclick=null;
 $('roll').addEventListener('click',roll);$('dice').addEventListener('pointerdown',roll);
 addEventListener('keydown',e=>{if(e.code==='Space'||e.code==='Enter'){e.preventDefault();roll()}if(phase==='choose'&&/^[1-4]$/.test(e.key))pick(+e.key-1)});
-$('b1').onclick=()=>newGame(1);$('bHuman').onclick=()=>{if(multiplayerPlayers<2){status('WAITING FOR PLAYER 2');return}newGame(2)};
+$('b1').onclick=()=>newGame(1);$('bHuman').onclick=()=>{if(multiplayerPlayers<2){status('WAITING FOR PLAYER 2');return}cur=0;newGame(2)};
 $('b3').onclick=()=>newGame(3);
 $('snd').onclick=()=>{muted=!muted;$('snd').textContent=muted?'SOUND OFF':'SOUND ON';if(muted)bgm(false);else if(active&&phase!=='over')bgm(true)};
 $('menu').onclick=()=>{gen++;phase='menu';mv=null;bgm(false);$('ovT').textContent='LUDO';$('ovP').textContent='ROLL A 6 TO LEAVE HOME. CAPTURE BOTS. GET ALL 4 HOME FIRST!';$('ov').classList.remove('hide');status('PICK A MODE TO START');ui2()};
@@ -193,7 +193,7 @@ document.addEventListener('visibilitychange',()=>{if(document.hidden)bgm(false);
 $('tip').disabled=true;$('tip').style.opacity=1;$('tip').style.color='var(--muted)';
 function multiplayerState(){return {mode:mode,active:active?active.slice():[],cur:cur,phase:phase,dice:diceV,tokens:tokens.map(p=>p.slice()),winner:winner,caps:caps,sixes:sixes,legal:legal}}
 function broadcastMultiplayer(){if(window.__LUDO_MULTIPLAYER__)window.__LUDO_MULTIPLAYER__.send('state',multiplayerState())}
-window.addEventListener('ludo-sync',function(e){const m=e.detail;if(!m||m.seat===window.__LUDO_MULTIPLAYER__.seat())return;if(m.type==='state'&&m.tokens){mode=m.mode||mode;active=m.active?m.active.slice():active;tokens=m.tokens;cur=m.cur;phase=m.phase;diceV=m.dice||diceV;winner=m.winner;caps=m.caps||0;sixes=m.sixes||0;legal=m.legal||[];ui()}if(m.type==='move'||m.type==='roll')status(PL[m.seat===0?0:2].n+' '+(m.type==='roll'?'ROLLED':'MOVED'))});
+window.addEventListener('ludo-sync',function(e){const m=e.detail;if(!m||m.seat===window.__LUDO_MULTIPLAYER__.seat())return;if(m.type==='state'&&m.tokens){mode=m.mode||mode;active=m.active?m.active.slice():active;tokens=m.tokens;cur=m.cur;phase=m.phase;diceV=m.dice||diceV;winner=m.winner;caps=m.caps||0;sixes=m.sixes||0;legal=m.legal||[];ui();if(mode===2){if(human(cur))status('YOUR TURN! TAP ROLL');else status(PL[cur].n+' WAITING FOR PLAYER')}}if(m.type==='move'||m.type==='roll')status(PL[m.seat===0?0:2].n+' '+(m.type==='roll'?'ROLLED':'MOVED'))});
 window.addEventListener('ludo-seat',function(e){multiplayerPlayers=e.detail.players||0;multiplayerSeat=e.detail.seat;if(e.detail.ready)status('PLAYER 2 CONNECTED | READY')});
 window.__LUDO_STATUS__=function(text){var el=document.getElementById('status');if(el)el.textContent=text;console.log('[LUDO STATUS]',text)};
 </script></body></html>
