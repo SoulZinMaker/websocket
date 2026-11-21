@@ -236,14 +236,19 @@ func main() {
 (function(){
 var lobby=window.__LOBBY_ID__||new URLSearchParams(location.search).get('lobby')||'lobby';
 var player=window.__PLAYER_ID__||new URLSearchParams(location.search).get('player')||'';
-if(!player){player=(crypto.randomUUID?crypto.randomUUID():Math.random().toString(36).slice(2));try{localStorage.setItem('ludo-player-id',player)}catch(e){}}
-var proto=location.protocol==='https:'?'wss':'ws';var ws=new WebSocket(proto+'://'+location.host+'/ws?lobby='+encodeURIComponent(lobby)+'&card='+encodeURIComponent(lobby)+'&player='+encodeURIComponent(player));
-window.__LUDO_WS__=ws;
-ws.onopen=function(){console.log('[LUDO] connected lobby='+lobby+' player='+player)};
-ws.onmessage=function(e){try{var m=JSON.parse(e.data);window.dispatchEvent(new CustomEvent('ludo-sync',{detail:m}));if(m.type==='joined')window.dispatchEvent(new CustomEvent('ludo-seat',{detail:m}))}catch(e){console.log('[LUDO] invalid message',e)}};
-ws.onerror=function(){console.log('[LUDO] connection error')};
-window.__LUDO_MULTIPLAYER__={seat:function(){return window.__LUDO_SEAT__||-1},players:function(){return window.__LUDO_PLAYERS__||0},send:function(type,data){if(ws.readyState===WebSocket.OPEN)ws.send(JSON.stringify(Object.assign({type:type,lobby:lobby,player:player},data||{})))}};
-window.addEventListener('ludo-seat',function(e){window.__LUDO_SEAT__=e.detail.seat;window.__LUDO_PLAYERS__=e.detail.players});
+if(!player){try{player=localStorage.getItem('ludo-player-id')||''}catch(e){}}
+if(!player){player=(window.crypto&&crypto.randomUUID)?crypto.randomUUID():Math.random().toString(36).slice(2);try{localStorage.setItem('ludo-player-id',player)}catch(e){}}
+window.__LUDO_SEAT__=-1;window.__LUDO_PLAYERS__=0;
+window.__LUDO_MULTIPLAYER__={seat:function(){return window.__LUDO_SEAT__},players:function(){return window.__LUDO_PLAYERS__},send:function(type,data){if(window.__LUDO_WS__&&window.__LUDO_WS__.readyState===WebSocket.OPEN)window.__LUDO_WS__.send(JSON.stringify(Object.assign({type:type,lobby:lobby,player:player},data||{})))}};
+function setStatus(text){var el=document.getElementById('status');if(el)el.textContent=text;console.log('[LUDO]',text)}
+function connect(){
+ var proto=location.protocol==='https:'?'wss':'ws';var ws=new WebSocket(proto+'://'+location.host+'/ws?lobby='+encodeURIComponent(lobby)+'&card='+encodeURIComponent(lobby)+'&player='+encodeURIComponent(player));window.__LUDO_WS__=ws;
+ ws.onopen=function(){setStatus('CONNECTED | Lobby '+lobby.slice(0,12)+' | Player '+player.slice(0,8))};
+ ws.onmessage=function(e){try{var m=JSON.parse(e.data);window.dispatchEvent(new CustomEvent('ludo-sync',{detail:m}));if(m.type==='joined'){window.__LUDO_SEAT__=m.seat;window.__LUDO_PLAYERS__=m.players;setStatus('CONNECTED | SEAT '+m.seat+' | PLAYERS '+m.players);window.dispatchEvent(new CustomEvent('ludo-seat',{detail:m}))}}catch(e){console.log('[LUDO] invalid message',e)}};
+ ws.onerror=function(){setStatus('CONNECTION ERROR')};
+ ws.onclose=function(){setStatus('RECONNECTING...');setTimeout(connect,1500)};
+}
+connect();
 })();
 </script>`
 		html = strings.Replace(html, "</body>", bootstrap+"</body>", 1)
