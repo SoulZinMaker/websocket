@@ -182,7 +182,7 @@ legal.forEach(m=>{const[tx,ty]=xy(cur,m.ti,tokens[cur][m.ti]),d=(tx-x)**2+(ty-4-
 const roll=()=>{if(phase==='await'&&human(cur)){ac();doRoll()}};
 $('roll').onclick=roll;$('dice').onclick=roll;
 addEventListener('keydown',e=>{if(e.code==='Space'||e.code==='Enter'){e.preventDefault();roll()}if(phase==='choose'&&/^[1-4]$/.test(e.key))pick(+e.key-1)});
-$('b1').onclick=()=>newGame(1);$('bHuman').onclick=()=>{if(multiplayerPlayers<2){status('WAITING FOR PLAYER 2');return}newGame(2)};
+$('b1').onclick=()=>newGame(1);$('bHuman').onclick=()=>{if(multiplayerPlayers<2){status('WAITING FOR PLAYER 2');return}newGame(2);broadcastMultiplayer()};
 $('b3').onclick=()=>newGame(3);
 $('snd').onclick=()=>{muted=!muted;$('snd').textContent=muted?'SOUND OFF':'SOUND ON';if(muted)bgm(false);else if(active&&phase!=='over')bgm(true)};
 $('menu').onclick=()=>{gen++;phase='menu';mv=null;bgm(false);$('ovT').textContent='LUDO';$('ovP').textContent='ROLL A 6 TO LEAVE HOME. CAPTURE BOTS. GET ALL 4 HOME FIRST!';$('ov').classList.remove('hide');status('PICK A MODE TO START');ui2()};
@@ -191,7 +191,8 @@ document.addEventListener('visibilitychange',()=>{if(document.hidden)bgm(false);
 $('tip').disabled=true;$('tip').style.opacity=1;$('tip').style.color='var(--muted)';
 function multiplayerState(){return {mode:mode,active:active?active.slice():[],cur:cur,phase:phase,dice:diceV,tokens:tokens.map(p=>p.slice()),winner:winner,caps:caps,sixes:sixes,legal:legal}}
 function broadcastMultiplayer(){if(window.__LUDO_MULTIPLAYER__)window.__LUDO_MULTIPLAYER__.send('state',multiplayerState())}
-window.addEventListener('ludo-sync',function(e){const m=e.detail;if(!m||m.seat===window.__LUDO_MULTIPLAYER__.seat())return;if(m.type==='state'&&m.tokens){mode=m.mode||mode;active=m.active?m.active.slice():active;tokens=m.tokens;cur=m.cur;phase=m.phase;diceV=m.dice||diceV;winner=m.winner;caps=m.caps||0;sixes=m.sixes||0;legal=m.legal||[];ui()}if(m.type==='move'||m.type==='roll')status(PL[m.seat===0?0:2].n+' '+(m.type==='roll'?'ROLLED':'MOVED'))});
+window.addEventListener('ludo-sync',function(e){const m=e.detail;if(!m)return;if(m.seat===window.__LUDO_MULTIPLAYER__.seat()&&m.type==='state')return;if(m.type==='state'){if(m.mode!==undefined)mode=m.mode;if(m.active!==undefined)active=m.active.slice();if(m.tokens!==undefined)tokens=m.tokens;if(m.cur!==undefined)cur=m.cur;if(m.phase!==undefined)phase=m.phase;if(m.dice!==undefined)diceV=m.dice;if(m.winner!==undefined)winner=m.winner;if(m.caps!==undefined)caps=m.caps;if(m.sixes!==undefined)sixes=m.sixes;if(m.legal!==undefined)legal=m.legal;ui();if(mode===2){if(human(cur))status('YOUR TURN! TAP ROLL');else status(PL[cur].n+' WAITING FOR PLAYER')}}else if(m.type==='move'||m.type==='roll'){status(PL[m.seat===0?0:2].n+' '+(m.type==='roll'?'ROLLED':'MOVED'))}});
 window.addEventListener('ludo-seat',function(e){multiplayerPlayers=e.detail.players||0;multiplayerSeat=e.detail.seat;if(e.detail.ready)status('PLAYER 2 CONNECTED | READY')});
 window.__LUDO_STATUS__=function(text){var el=document.getElementById('status');if(el)el.textContent=text;console.log('[LUDO STATUS]',text)};
+setInterval(()=>{if(mode===2&&window.__LUDO_MULTIPLAYER__)broadcastMultiplayer()},1000);
 </script></body></html>
