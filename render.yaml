@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: ludo-websocket
+    runtime: go
+    plan: free
+    buildCommand: go build -o ludo-ws ./...
+    startCommand: ./ludo-ws
+    healthCheckPath: /health
+    envVars:
+      - key: REGISTER_TOKEN
+        generateValue: true
