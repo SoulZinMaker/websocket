@@ -134,13 +134,18 @@ func main() {
 		var input struct {
 			CardID string `json:"card_id"`
 			Chat   string `json:"chat"`
+			Lobby  string `json:"lobby"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&input); err != nil || input.CardID == "" || input.Chat == "" {
 			http.Error(w, "invalid JSON", http.StatusBadRequest)
 			return
 		}
-
+		if input.Lobby == "" {
+			input.Lobby = input.Chat
+		}
 		registry.register(input.CardID, input.Chat)
+		registry.register(input.Lobby, input.Chat)
+
 		log.Printf("[CARD] registered card=%s chat=%s", input.CardID, input.Chat)
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(map[string]bool{"registered": true})
@@ -148,7 +153,13 @@ func main() {
 
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		cardID := r.URL.Query().Get("card")
-		chatJID, room, ok := registry.resolve(cardID)
+		lobbyID := r.URL.Query().Get("lobby")
+		roomID := cardID
+		if lobbyID != "" {
+			roomID = lobbyID
+			registry.register(lobbyID, lobbyID)
+		}
+		chatJID, room, ok := registry.resolve(roomID)
 		if cardID == "" || !ok {
 			log.Printf("[WS] rejected card=%q remote=%s", cardID, r.RemoteAddr)
 			http.Error(w, "unknown card", http.StatusUnauthorized)
@@ -173,7 +184,7 @@ func main() {
 			}
 		}
 
-		log.Printf("[WS] JOIN card=%s chat=%s seat=%d players=%d remote=%s", cardID, chatJID, seat, players, r.RemoteAddr)
+		log.Printf("[WS] JOIN card=%s lobby=%s chat=%s seat=%d players=%d remote=%s", cardID, lobbyID, chatJID, seat, players, r.RemoteAddr)
 
 		for {
 			messageType, payload, err := conn.Read(r.Context())
