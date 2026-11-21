@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -10,24 +11,103 @@ import (
 	"github.com/coder/websocket"
 )
 
-type Registry struct {
-	mu    sync.RWMutex
-	cards map[string]string
+type Room struct {
+	mu          sync.Mutex
+	connections map[*websocket.Conn]int
+	seatOwner   map[int]bool
+	state       []byte
+
+	playerSeat  map[string]int
+	playerConns map[string]int
 }
 
-var registry = &Registry{cards: make(map[string]string)}
+type RoomRegistry struct {
+	mu    sync.RWMutex
+	cards map[string]string
+	rooms map[string]*Room
+}
 
-func (r *Registry) register(cardID, chatJID string) {
+var registry = &RoomRegistry{
+	cards: make(map[string]string),
+	rooms: make(map[string]*Room),
+}
+
+func (r *RoomRegistry) register(cardID, chatJID string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.cards[cardID] = chatJID
+	if r.rooms[cardID] == nil {
+		r.rooms[cardID] = &Room{
+			connections: make(map[*websocket.Conn]int),
+			seatOwner:   make(map[int]bool),
+			playerSeat:  make(map[string]int),
+			playerConns: make(map[string]int),
+		}
+	}
 }
 
-func (r *Registry) resolve(cardID string) (string, bool) {
+func (r *RoomRegistry) resolve(cardID string) (string, *Room, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	chatJID, ok := r.cards[cardID]
-	return chatJID, ok
+	chatJID, chatOK := r.cards[cardID]
+	room, roomOK := r.rooms[cardID]
+	return chatJID, room, chatOK && roomOK
+}
+
+func (room *Room) join(conn *websocket.Conn, playerID string) (int, int) {
+	room.mu.Lock()
+	defer room.mu.Unlock()
+	if playerID == "" {
+		playerID = "anonymous"
+	}
+	seat, reused := room.playerSeat[playerID]
+	if reused {
+		room.connections[conn] = seat
+		room.playerConns[playerID]++
+		return seat, len(room.playerSeat)
+	}
+	seat = -1
+	for i := 0; i < 4; i++ {
+		if !room.seatOwner[i] {
+			seat = i
+			room.seatOwner[i] = true
+			break
+		}
+	}
+	room.connections[conn] = seat
+	if seat >= 0 {
+		room.playerSeat[playerID] = seat
+		room.playerConns[playerID] = 1
+	}
+	return seat, len(room.playerSeat)
+}
+
+func (room *Room) leave(conn *websocket.Conn) {
+	room.mu.Lock()
+	defer room.mu.Unlock()
+	delete(room.connections, conn)
+}
+
+func (room *Room) broadcast(payload []byte) {
+	room.mu.Lock()
+	defer room.mu.Unlock()
+	for conn := range room.connections {
+		if err := conn.Write(context.Background(), websocket.MessageText, payload); err != nil {
+			log.Printf("[WS] broadcast write error: %v", err)
+		}
+	}
+}
+
+func (room *Room) snapshot() []byte {
+	room.mu.Lock()
+	defer room.mu.Unlock()
+	return append([]byte(nil), room.state...)
+}
+
+func (room *Room) setState(payload []byte) {
+	room.mu.Lock()
+	room.state = append([]byte(nil), payload...)
+	room.mu.Unlock()
 }
 
 func main() {
@@ -68,7 +148,7 @@ func main() {
 
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		cardID := r.URL.Query().Get("card")
-		chatJID, ok := registry.resolve(cardID)
+		chatJID, room, ok := registry.resolve(cardID)
 		if cardID == "" || !ok {
 			log.Printf("[WS] rejected card=%q remote=%s", cardID, r.RemoteAddr)
 			http.Error(w, "unknown card", http.StatusUnauthorized)
@@ -82,14 +162,43 @@ func main() {
 		}
 		defer conn.Close(websocket.StatusNormalClosure, "closed")
 
-		log.Printf("[WS] OPEN card=%s chat=%s remote=%s", cardID, chatJID, r.RemoteAddr)
+		playerID := r.URL.Query().Get("player")
+		seat, players := room.join(conn, playerID)
+		defer room.leave(conn)
+		joined, _ := json.Marshal(map[string]any{"type": "joined", "seat": seat, "players": players, "ready": players >= 2, "card": cardID, "player": playerID})
+		room.broadcast(joined)
+		if snapshot := room.snapshot(); len(snapshot) > 0 {
+			if err := conn.Write(r.Context(), websocket.MessageText, snapshot); err != nil {
+				log.Printf("[WS] snapshot write error card=%s: %v", cardID, err)
+			}
+		}
+
+		log.Printf("[WS] JOIN card=%s chat=%s seat=%d players=%d remote=%s", cardID, chatJID, seat, players, r.RemoteAddr)
+
 		for {
 			messageType, payload, err := conn.Read(r.Context())
 			if err != nil {
-				log.Printf("[WS] CLOSE card=%s chat=%s err=%v", cardID, chatJID, err)
+				left, _ := json.Marshal(map[string]any{"type": "left", "seat": seat, "card": cardID})
+				room.broadcast(left)
+				log.Printf("[WS] CLOSE card=%s chat=%s seat=%d err=%v", cardID, chatJID, seat, err)
 				return
 			}
-			log.Printf("[WS] MESSAGE card=%s chat=%s type=%d payload=%s", cardID, chatJID, messageType, payload)
+			if messageType != websocket.MessageText {
+				continue
+			}
+
+			var event map[string]any
+			if err := json.Unmarshal(payload, &event); err != nil {
+				continue
+			}
+			event["card"] = cardID
+			event["seat"] = seat
+			relay, _ := json.Marshal(event)
+			if event["type"] == "state" {
+				room.setState(relay)
+			}
+			room.broadcast(relay)
+			log.Printf("[WS] ACTION card=%s chat=%s seat=%d payload=%s", cardID, chatJID, seat, relay)
 		}
 	})
 
